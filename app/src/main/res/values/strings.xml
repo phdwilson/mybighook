@@ -51,4 +51,5 @@
     <string name="action_activate_profile">🛡 Activate Protection</string>
     <string name="action_copy_profile">📋 Copy to Clipboard</string>
     <string name="toast_profile_copied">Profile data copied to clipboard</string>
+    <string name="profile_unnamed">Unnamed</string>
 </resources>

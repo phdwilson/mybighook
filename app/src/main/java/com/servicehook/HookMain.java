@@ -881,7 +881,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 setFieldIfExists(identity, "mPci", e.pci);
                 setFieldIfExists(identity, "mTac", e.lac);
                 setFieldIfExists(identity, "mNrArfcn", e.earfcn);
-                setFieldIfExists(identity, "mNci", (long) e.cid);
+                setFieldIfExists(identity, "mNci", e.nci != 0 ? e.nci : (long) e.cid);
                 setFieldIfExists(identity, "mMccStr", String.format("%03d", e.mcc));
                 setFieldIfExists(identity, "mMncStr", String.format("%02d", e.mnc));
             } catch (Throwable ignored) {}

@@ -264,7 +264,8 @@ public class SnapshotManager {
                     e.lac = nrId.getTac();
                     e.pci = nrId.getPci();
                     e.earfcn = nrId.getNrarfcn();
-                    e.cid = (int) nrId.getNci(); // NCI can be long, truncate to int
+                    e.nci = nrId.getNci();
+                    e.cid = (int) e.nci; // also set cid for backward compat
                 } catch (Throwable ignored) {
                 }
                 return e;

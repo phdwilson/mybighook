@@ -279,7 +279,7 @@ public class MainActivity extends AppCompatActivity {
         Button   btnDel    = itemView.findViewById(R.id.btn_profile_delete);
         View     root      = itemView.findViewById(R.id.profile_item_root);
 
-        tvName.setText(profile.name != null ? profile.name : "Unnamed");
+        tvName.setText(profile.name != null ? profile.name : getString(R.string.profile_unnamed));
 
         StringBuilder details = new StringBuilder();
         if (profile.snapshot != null) {
@@ -315,7 +315,7 @@ public class MainActivity extends AppCompatActivity {
         new AlertDialog.Builder(this)
                 .setTitle(R.string.dialog_delete_title)
                 .setMessage(String.format(getString(R.string.dialog_delete_message),
-                        profile.name != null ? profile.name : "Unnamed"))
+                        profile.name != null ? profile.name : getString(R.string.profile_unnamed)))
                 .setPositiveButton(android.R.string.ok, (dialog, which) -> {
                     ProfileManager.deleteProfile(getApplicationContext(), profile.id);
                     if (profile.id != null && profile.id.equals(activeProfileId)) {
@@ -341,7 +341,7 @@ public class MainActivity extends AppCompatActivity {
                 getString(R.string.action_copy_profile)
         };
         new AlertDialog.Builder(this)
-                .setTitle(profile.name != null ? profile.name : "Unnamed")
+                .setTitle(profile.name != null ? profile.name : getString(R.string.profile_unnamed))
                 .setItems(options, (dialog, which) -> {
                     if (which == 0) {
                         activateProfile(profile);
