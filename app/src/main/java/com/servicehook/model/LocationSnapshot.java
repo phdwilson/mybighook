@@ -50,11 +50,12 @@ public class LocationSnapshot {
         public int    mcc;   // Mobile Country Code
         public int    mnc;   // Mobile Network Code
         public int    lac;   // Location Area Code (GSM/UMTS) / TAC (LTE)
-        public int    cid;   // Cell Identity
+        public int    cid;   // Cell Identity (LTE/GSM/UMTS)
+        public long   nci;   // NR Cell Identity (36-bit, 5G only)
         public int    pci;   // Physical Cell ID (LTE/NR)
         public String type;  // "LTE", "NR", "UMTS", "GSM"
         public int    dbm;   // Signal strength in dBm
-        public int    earfcn; // Absolute RF channel number (LTE)
+        public int    earfcn; // Absolute RF channel number (LTE/NR)
     }
 
     /**

@@ -46,4 +46,10 @@
     <string name="dialog_save_cancel">Cancel</string>
     <string name="dialog_delete_title">Delete Profile</string>
     <string name="dialog_delete_message">Delete profile \"%s\"?</string>
+
+    <!-- Profile action dialog -->
+    <string name="action_activate_profile">🛡 Activate Protection</string>
+    <string name="action_copy_profile">📋 Copy to Clipboard</string>
+    <string name="toast_profile_copied">Profile data copied to clipboard</string>
+    <string name="profile_unnamed">Unnamed</string>
 </resources>
