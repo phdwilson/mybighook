@@ -145,7 +145,7 @@ public class SnapshotManager {
                         // Prefer a location that has altitude
                         bestLoc = loc;
                     } else if (loc.hasAltitude() == bestLoc.hasAltitude()
-                            && loc.getAccuracy() < bestLoc.getAccuracy()) {
+                            && loc.hasAccuracy() && loc.getAccuracy() < bestLoc.getAccuracy()) {
                         // Same altitude availability: prefer better accuracy
                         bestLoc = loc;
                     }
