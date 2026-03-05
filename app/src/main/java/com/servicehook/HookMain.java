@@ -21,6 +21,7 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -49,7 +50,7 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class HookMain implements IXposedHookLoadPackage {
 
     private static final String TAG = "SH";
-    private static final long SNAPSHOT_CACHE_MS = 15_000L;
+    private static final long SNAPSHOT_CACHE_MS = 30_000L;
     private static final Gson GSON = new Gson();
 
     private static final int BASE_SATELLITE_COUNT     = 10;
@@ -74,6 +75,11 @@ public class HookMain implements IXposedHookLoadPackage {
     private volatile long lastCacheRefresh = 0L;
     private final Random rng = new Random();
     private final ConcurrentHashMap<String, Long> lastReportTime = new ConcurrentHashMap<>();
+    /** Prevents multiple threads from refreshing the snapshot cache concurrently. */
+    private final AtomicBoolean refreshing = new AtomicBoolean(false);
+    /** Re-entrancy guard: prevents recursive IPC when ContentResolver.call()
+     *  internally triggers one of our hooked methods in the same thread. */
+    private final ThreadLocal<Boolean> inGetSnapshot = ThreadLocal.withInitial(() -> Boolean.FALSE);
     private final ExecutorService reportExecutor = Executors.newSingleThreadExecutor(r -> {
         Thread t = new Thread(r, "SH-report");
         t.setDaemon(true);
@@ -150,16 +156,58 @@ public class HookMain implements IXposedHookLoadPackage {
 
     /**
      * Returns the active snapshot, or null if none is configured.
-     * Refreshes from the ContentProvider at most once per {@link #SNAPSHOT_CACHE_MS}.
+     * <p>
+     * <b>Non-blocking</b>: if the cache has expired, the stale value is returned
+     * immediately and a single background thread refreshes it via the
+     * ContentProvider.  This prevents Binder storms on hot paths such as
+     * {@code Location.getLatitude()} which may be called hundreds of times
+     * per second.
+     * <p>
+     * A {@link ThreadLocal} re-entrancy guard stops infinite recursion when
+     * {@code ContentResolver.call()} itself triggers a hooked method in the
+     * same thread.
      */
     private LocationSnapshot getSnapshot() {
+        // Re-entrancy guard: if we are already inside an IPC call on this
+        // thread, return whatever is cached to break the recursion.
+        if (Boolean.TRUE.equals(inGetSnapshot.get())) {
+            return cachedSnap;
+        }
+
         long now = SystemClock.elapsedRealtime();
         if (cachedSnap != null && (now - lastCacheRefresh) < SNAPSHOT_CACHE_MS) {
             return cachedSnap;
         }
+
+        // Schedule a non-blocking async refresh; return stale cache in the meantime.
+        // Only one thread may refresh at a time (CAS on refreshing flag).
+        if (refreshing.compareAndSet(false, true)) {
+            reportExecutor.execute(() -> {
+                try {
+                    refreshSnapshotFromProvider();
+                } finally {
+                    refreshing.set(false);
+                }
+            });
+        }
+
+        // First activation: cachedSnap is null and no refresh has completed yet.
+        // Try a single synchronous load so the very first hook call gets data,
+        // but only if we are not already refreshing in another thread.
+        if (cachedSnap == null && lastCacheRefresh == 0L) {
+            refreshSnapshotFromProvider();
+        }
+
+        return cachedSnap;
+    }
+
+    /**
+     * Performs the actual ContentProvider IPC to load the snapshot.
+     * Guarded by the {@link #inGetSnapshot} ThreadLocal to prevent recursion.
+     */
+    private void refreshSnapshotFromProvider() {
         android.content.Context ctx = appCtx;
         if (ctx == null) {
-            // Try the Android helper as a fallback
             try {
                 ctx = (android.content.Context)
                         XposedHelpers.callStaticMethod(
@@ -169,8 +217,9 @@ public class HookMain implements IXposedHookLoadPackage {
             } catch (Throwable ignored) {
             }
         }
-        if (ctx == null) return cachedSnap; // keep previous cache
+        if (ctx == null) return;
 
+        inGetSnapshot.set(Boolean.TRUE);
         try {
             Bundle result = ctx.getContentResolver().call(
                     Uri.parse("content://" + StatsProvider.AUTHORITY),
@@ -185,12 +234,13 @@ public class HookMain implements IXposedHookLoadPackage {
             } else {
                 cachedSnap = null;
             }
-            lastCacheRefresh = now;
+            lastCacheRefresh = SystemClock.elapsedRealtime();
         } catch (Throwable t) {
             // Provider unavailable; keep stale cache so we don't spam Binder
-            lastCacheRefresh = now;
+            lastCacheRefresh = SystemClock.elapsedRealtime();
+        } finally {
+            inGetSnapshot.set(Boolean.FALSE);
         }
-        return cachedSnap;
     }
 
     /** Send a throttled, non-blocking increment to the provider (fire-and-forget, best effort). */
@@ -680,13 +730,23 @@ public class HookMain implements IXposedHookLoadPackage {
     }
 
     /**
-     * Build a {@link android.telephony.CellInfoLte} (or other type) via reflection
+     * Build a {@link android.telephony.CellInfo} subclass via reflection
      * to remain compatible across Android versions whose constructors differ.
+     * Supports LTE, NR (5G), GSM, and UMTS.
      */
     private android.telephony.CellInfo buildFakeCellInfo(LocationSnapshot.CellEntry entry) {
         try {
             if ("LTE".equals(entry.type) || entry.type == null) {
                 return buildCellInfoLte(entry);
+            }
+            if ("NR".equals(entry.type)) {
+                return buildCellInfoNr(entry);
+            }
+            if ("GSM".equals(entry.type)) {
+                return buildCellInfoGsm(entry);
+            }
+            if ("UMTS".equals(entry.type)) {
+                return buildCellInfoWcdma(entry);
             }
         } catch (Throwable ignored) {}
         return null;
@@ -795,6 +855,186 @@ public class HookMain implements IXposedHookLoadPackage {
 
             return ci;
 
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * Build a fake NR (5G) CellInfo via reflection.
+     * Falls back gracefully if NR classes are not available (pre-API 29).
+     */
+    @SuppressWarnings("JavaReflectionMemberAccess")
+    private android.telephony.CellInfo buildCellInfoNr(LocationSnapshot.CellEntry e) {
+        try {
+            // CellInfoNr requires API 29+
+            Class<?> ciCls = Class.forName("android.telephony.CellInfoNr");
+            Class<?> cidCls = Class.forName("android.telephony.CellIdentityNr");
+            Class<?> ssCls = Class.forName("android.telephony.CellSignalStrengthNr");
+
+            // ── CellIdentityNr ────────────────────────────────────────────────
+            Object identity = null;
+            try {
+                Constructor<?> ctor = cidCls.getDeclaredConstructor();
+                ctor.setAccessible(true);
+                identity = ctor.newInstance();
+                setFieldIfExists(identity, "mPci", e.pci);
+                setFieldIfExists(identity, "mTac", e.lac);
+                setFieldIfExists(identity, "mNrArfcn", e.earfcn);
+                setFieldIfExists(identity, "mNci", (long) e.cid);
+                setFieldIfExists(identity, "mMccStr", String.format("%03d", e.mcc));
+                setFieldIfExists(identity, "mMncStr", String.format("%02d", e.mnc));
+            } catch (Throwable ignored) {}
+
+            // ── CellSignalStrengthNr ──────────────────────────────────────────
+            Object ss = null;
+            try {
+                Constructor<?> ctor = ssCls.getDeclaredConstructor();
+                ctor.setAccessible(true);
+                ss = ctor.newInstance();
+                int dbm = e.dbm + cellNoise();
+                setFieldIfExists(ss, "mSsRsrp", dbm);
+                setFieldIfExists(ss, "mSsRsrq", -10);
+                setFieldIfExists(ss, "mSsSinr", 20);
+                setFieldIfExists(ss, "mCsiRsrp", dbm);
+            } catch (Throwable ignored) {}
+
+            // ── CellInfoNr ────────────────────────────────────────────────────
+            Object ci;
+            try {
+                Constructor<?> ctor = ciCls.getDeclaredConstructor();
+                ctor.setAccessible(true);
+                ci = ctor.newInstance();
+            } catch (Throwable t) {
+                return null;
+            }
+
+            setFieldIfExists(ci, "mRegistered", true);
+            setFieldIfExists(ci, "mTimeStamp", SystemClock.elapsedRealtimeNanos());
+            if (identity != null) {
+                Field fId = findField(ciCls, "mCellIdentity");
+                if (fId != null) { fId.setAccessible(true); fId.set(ci, identity); }
+            }
+            if (ss != null) {
+                Field fSs = findField(ciCls, "mCellSignalStrength");
+                if (fSs != null) { fSs.setAccessible(true); fSs.set(ci, ss); }
+            }
+            return (android.telephony.CellInfo) ci;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * Build a fake GSM CellInfo via reflection.
+     */
+    @SuppressWarnings("JavaReflectionMemberAccess")
+    private android.telephony.CellInfo buildCellInfoGsm(LocationSnapshot.CellEntry e) {
+        try {
+            Class<?> ciCls = android.telephony.CellInfoGsm.class;
+            Class<?> cidCls = Class.forName("android.telephony.CellIdentityGsm");
+            Class<?> ssCls = Class.forName("android.telephony.CellSignalStrengthGsm");
+
+            Object identity = null;
+            try {
+                Constructor<?> ctor = cidCls.getDeclaredConstructor();
+                ctor.setAccessible(true);
+                identity = ctor.newInstance();
+                setFieldIfExists(identity, "mMcc", e.mcc);
+                setFieldIfExists(identity, "mMnc", e.mnc);
+                setFieldIfExists(identity, "mLac", e.lac);
+                setFieldIfExists(identity, "mCid", e.cid);
+                setFieldIfExists(identity, "mMccStr", String.format("%03d", e.mcc));
+                setFieldIfExists(identity, "mMncStr", String.format("%02d", e.mnc));
+            } catch (Throwable ignored) {}
+
+            Object ss = null;
+            try {
+                Constructor<?> ctor = ssCls.getDeclaredConstructor();
+                ctor.setAccessible(true);
+                ss = ctor.newInstance();
+                int dbm = e.dbm + cellNoise();
+                setFieldIfExists(ss, "mSignalStrength", Math.min(31, (dbm + 140) / 2));
+            } catch (Throwable ignored) {}
+
+            android.telephony.CellInfoGsm ci;
+            try {
+                Constructor<?> ctor = ciCls.getDeclaredConstructor();
+                ctor.setAccessible(true);
+                ci = (android.telephony.CellInfoGsm) ctor.newInstance();
+            } catch (Throwable t) {
+                return null;
+            }
+
+            setFieldIfExists(ci, "mRegistered", true);
+            setFieldIfExists(ci, "mTimeStamp", SystemClock.elapsedRealtimeNanos());
+            if (identity != null) {
+                Field fId = findField(ciCls, "mCellIdentityGsm");
+                if (fId != null) { fId.setAccessible(true); fId.set(ci, identity); }
+            }
+            if (ss != null) {
+                Field fSs = findField(ciCls, "mCellSignalStrengthGsm");
+                if (fSs != null) { fSs.setAccessible(true); fSs.set(ci, ss); }
+            }
+            return ci;
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    /**
+     * Build a fake WCDMA (UMTS) CellInfo via reflection.
+     */
+    @SuppressWarnings("JavaReflectionMemberAccess")
+    private android.telephony.CellInfo buildCellInfoWcdma(LocationSnapshot.CellEntry e) {
+        try {
+            Class<?> ciCls = android.telephony.CellInfoWcdma.class;
+            Class<?> cidCls = Class.forName("android.telephony.CellIdentityWcdma");
+            Class<?> ssCls = Class.forName("android.telephony.CellSignalStrengthWcdma");
+
+            Object identity = null;
+            try {
+                Constructor<?> ctor = cidCls.getDeclaredConstructor();
+                ctor.setAccessible(true);
+                identity = ctor.newInstance();
+                setFieldIfExists(identity, "mMcc", e.mcc);
+                setFieldIfExists(identity, "mMnc", e.mnc);
+                setFieldIfExists(identity, "mLac", e.lac);
+                setFieldIfExists(identity, "mCid", e.cid);
+                setFieldIfExists(identity, "mPsc", e.pci);
+                setFieldIfExists(identity, "mMccStr", String.format("%03d", e.mcc));
+                setFieldIfExists(identity, "mMncStr", String.format("%02d", e.mnc));
+            } catch (Throwable ignored) {}
+
+            Object ss = null;
+            try {
+                Constructor<?> ctor = ssCls.getDeclaredConstructor();
+                ctor.setAccessible(true);
+                ss = ctor.newInstance();
+                int dbm = e.dbm + cellNoise();
+                setFieldIfExists(ss, "mSignalStrength", Math.min(31, (dbm + 140) / 2));
+            } catch (Throwable ignored) {}
+
+            android.telephony.CellInfoWcdma ci;
+            try {
+                Constructor<?> ctor = ciCls.getDeclaredConstructor();
+                ctor.setAccessible(true);
+                ci = (android.telephony.CellInfoWcdma) ctor.newInstance();
+            } catch (Throwable t) {
+                return null;
+            }
+
+            setFieldIfExists(ci, "mRegistered", true);
+            setFieldIfExists(ci, "mTimeStamp", SystemClock.elapsedRealtimeNanos());
+            if (identity != null) {
+                Field fId = findField(ciCls, "mCellIdentityWcdma");
+                if (fId != null) { fId.setAccessible(true); fId.set(ci, identity); }
+            }
+            if (ss != null) {
+                Field fSs = findField(ciCls, "mCellSignalStrengthWcdma");
+                if (fSs != null) { fSs.setAccessible(true); fSs.set(ci, ss); }
+            }
+            return ci;
         } catch (Throwable t) {
             return null;
         }

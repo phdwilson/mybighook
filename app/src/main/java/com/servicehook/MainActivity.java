@@ -2,6 +2,9 @@ package com.servicehook;
 
 import android.Manifest;
 import android.app.AlertDialog;
+import android.content.ClipData;
+import android.content.ClipboardManager;
+import android.content.Context;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.net.Uri;
@@ -301,7 +304,7 @@ public class MainActivity extends AppCompatActivity {
             if (isThisActive) {
                 toggleActivation(); // deactivate
             } else {
-                activateProfile(profile);
+                showProfileActionDialog(profile);
             }
         });
 
@@ -326,6 +329,39 @@ public class MainActivity extends AppCompatActivity {
                 })
                 .setNegativeButton(android.R.string.cancel, null)
                 .show();
+    }
+
+    /**
+     * Shows a dialog when tapping a saved profile, letting the user choose
+     * between activating the profile or copying its data to the clipboard.
+     */
+    private void showProfileActionDialog(SnapshotProfile profile) {
+        String[] options = {
+                getString(R.string.action_activate_profile),
+                getString(R.string.action_copy_profile)
+        };
+        new AlertDialog.Builder(this)
+                .setTitle(profile.name != null ? profile.name : "Unnamed")
+                .setItems(options, (dialog, which) -> {
+                    if (which == 0) {
+                        activateProfile(profile);
+                    } else if (which == 1) {
+                        copyProfileToClipboard(profile);
+                    }
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    private void copyProfileToClipboard(SnapshotProfile profile) {
+        String json = GSON.toJson(profile.snapshot);
+        ClipboardManager clipboard =
+                (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
+        if (clipboard != null) {
+            ClipData clip = ClipData.newPlainText("ServiceHook Profile", json);
+            clipboard.setPrimaryClip(clip);
+            Toast.makeText(this, R.string.toast_profile_copied, Toast.LENGTH_SHORT).show();
+        }
     }
 
     // ── Export / Import ────────────────────────────────────────────────────────

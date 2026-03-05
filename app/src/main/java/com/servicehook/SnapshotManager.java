@@ -255,6 +255,18 @@ public class SnapshotManager {
                 CellInfoNr nr = (CellInfoNr) ci;
                 e.type  = "NR";
                 e.dbm   = nr.getCellSignalStrength().getDbm();
+                // CellIdentityNr fields (API 29+)
+                try {
+                    android.telephony.CellIdentityNr nrId =
+                            (android.telephony.CellIdentityNr) nr.getCellIdentity();
+                    e.mcc = parseMcc(nrId.getMccString());
+                    e.mnc = parseMnc(nrId.getMncString());
+                    e.lac = nrId.getTac();
+                    e.pci = nrId.getPci();
+                    e.earfcn = nrId.getNrarfcn();
+                    e.cid = (int) nrId.getNci(); // NCI can be long, truncate to int
+                } catch (Throwable ignored) {
+                }
                 return e;
             }
         } catch (Throwable ignored) {
