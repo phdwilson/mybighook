@@ -44,18 +44,22 @@ public class SnapshotManager {
     /**
      * Collect a best-effort snapshot from the device's current environment.
      * GPS is gathered from the last-known location (fast, no timeout).
-     * Returns null if no location is available and the caller should retry.
+     * Returns null if collection fails entirely.
      */
     public static LocationSnapshot collectSnapshot(Context ctx) {
-        LocationSnapshot snap = new LocationSnapshot();
-        snap.captureTime = System.currentTimeMillis();
+        try {
+            LocationSnapshot snap = new LocationSnapshot();
+            snap.captureTime = System.currentTimeMillis();
 
-        fillGps(ctx, snap);
-        fillWifi(ctx, snap);
-        fillCell(ctx, snap);
-        fillSensors(ctx, snap);
+            fillGps(ctx, snap);
+            fillWifi(ctx, snap);
+            fillCell(ctx, snap);
+            fillSensors(ctx, snap);
 
-        return snap;
+            return snap;
+        } catch (Throwable t) {
+            return null;
+        }
     }
 
     /** Persist snapshot locally and push it to the StatsProvider. */
@@ -73,7 +77,9 @@ public class SnapshotManager {
         String json = prefs.getString(KEY_SNAPSHOT, null);
         if (json == null) return null;
         try {
-            return GSON.fromJson(json, LocationSnapshot.class);
+            LocationSnapshot snap = GSON.fromJson(json, LocationSnapshot.class);
+            if (snap != null) snap.ensureNonNullLists();
+            return snap;
         } catch (Exception e) {
             return null;
         }
@@ -133,7 +139,7 @@ public class SnapshotManager {
                 try {
                     loc = lm.getLastKnownLocation(provider);
                     if (loc != null) break;
-                } catch (Exception ignored) {
+                } catch (Throwable ignored) {
                 }
             }
             if (loc != null) {
@@ -144,7 +150,7 @@ public class SnapshotManager {
                 snap.bearing   = loc.getBearing();
                 snap.speed     = loc.getSpeed();
             }
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
     }
 
@@ -174,6 +180,7 @@ public class SnapshotManager {
                     if (snap.wifiList.size() >= MAX_WIFI_APS) break;
                     // Skip if we already added the connected network
                     if (!snap.wifiList.isEmpty()
+                            && sr.BSSID != null
                             && sr.BSSID.equalsIgnoreCase(snap.wifiList.get(0).bssid)) {
                         continue;
                     }
@@ -186,7 +193,7 @@ public class SnapshotManager {
                     snap.wifiList.add(entry);
                 }
             }
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
     }
 
@@ -203,7 +210,7 @@ public class SnapshotManager {
                 LocationSnapshot.CellEntry entry = parseCellInfo(ci);
                 if (entry != null) snap.cellList.add(entry);
             }
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
     }
 
@@ -250,42 +257,45 @@ public class SnapshotManager {
                 e.dbm   = nr.getCellSignalStrength().getDbm();
                 return e;
             }
-        } catch (Exception ignored) {
+        } catch (Throwable ignored) {
         }
         return null;
     }
 
     private static void fillSensors(Context ctx, final LocationSnapshot snap) {
-        SensorManager sm = (SensorManager) ctx.getSystemService(Context.SENSOR_SERVICE);
-        if (sm == null) return;
+        try {
+            SensorManager sm = (SensorManager) ctx.getSystemService(Context.SENSOR_SERVICE);
+            if (sm == null) return;
 
-        // Capture one reading from each sensor synchronously (best effort, 200 ms timeout)
-        readSensorOnce(sm, Sensor.TYPE_ACCELEROMETER, 200, values -> {
-            if (values.length >= 3) {
-                snap.accelX = values[0];
-                snap.accelY = values[1];
-                snap.accelZ = values[2];
-            }
-        });
-        readSensorOnce(sm, Sensor.TYPE_GYROSCOPE, 200, values -> {
-            if (values.length >= 3) {
-                snap.gyroX = values[0];
-                snap.gyroY = values[1];
-                snap.gyroZ = values[2];
-            }
-        });
-        readSensorOnce(sm, Sensor.TYPE_MAGNETIC_FIELD, 200, values -> {
-            if (values.length >= 3) {
-                snap.magX = values[0];
-                snap.magY = values[1];
-                snap.magZ = values[2];
-            }
-        });
-        readSensorOnce(sm, Sensor.TYPE_PRESSURE, 200, values -> {
-            if (values.length >= 1) {
-                snap.pressure = values[0];
-            }
-        });
+            // Capture one reading from each sensor synchronously (best effort, 200 ms timeout)
+            readSensorOnce(sm, Sensor.TYPE_ACCELEROMETER, 200, values -> {
+                if (values.length >= 3) {
+                    snap.accelX = values[0];
+                    snap.accelY = values[1];
+                    snap.accelZ = values[2];
+                }
+            });
+            readSensorOnce(sm, Sensor.TYPE_GYROSCOPE, 200, values -> {
+                if (values.length >= 3) {
+                    snap.gyroX = values[0];
+                    snap.gyroY = values[1];
+                    snap.gyroZ = values[2];
+                }
+            });
+            readSensorOnce(sm, Sensor.TYPE_MAGNETIC_FIELD, 200, values -> {
+                if (values.length >= 3) {
+                    snap.magX = values[0];
+                    snap.magY = values[1];
+                    snap.magZ = values[2];
+                }
+            });
+            readSensorOnce(sm, Sensor.TYPE_PRESSURE, 200, values -> {
+                if (values.length >= 1) {
+                    snap.pressure = values[0];
+                }
+            });
+        } catch (Throwable ignored) {
+        }
     }
 
     private interface FloatConsumer {
@@ -303,7 +313,12 @@ public class SnapshotManager {
         SensorEventListener listener = new SensorEventListener() {
             @Override
             public void onSensorChanged(SensorEvent event) {
-                consumer.accept(event.values.clone());
+                try {
+                    if (event != null && event.values != null) {
+                        consumer.accept(event.values.clone());
+                    }
+                } catch (Throwable ignored) {
+                }
                 synchronized (lock) {
                     done[0] = true;
                     lock.notifyAll();
@@ -313,15 +328,23 @@ public class SnapshotManager {
             public void onAccuracyChanged(Sensor s, int accuracy) {}
         };
 
-        sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_FASTEST);
+        try {
+            sm.registerListener(listener, sensor, SensorManager.SENSOR_DELAY_FASTEST);
+        } catch (Throwable ignored) {
+            return;
+        }
         try {
             synchronized (lock) {
                 if (!done[0]) lock.wait(timeoutMs);
             }
         } catch (InterruptedException ignored) {
             Thread.currentThread().interrupt();
+        } catch (Throwable ignored) {
         } finally {
-            sm.unregisterListener(listener);
+            try {
+                sm.unregisterListener(listener);
+            } catch (Throwable ignored) {
+            }
         }
     }
 

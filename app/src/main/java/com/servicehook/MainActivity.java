@@ -131,18 +131,26 @@ public class MainActivity extends AppCompatActivity {
         btnCollect.setText(R.string.btn_collecting);
 
         executor.execute(() -> {
-            LocationSnapshot snap = SnapshotManager.collectSnapshot(getApplicationContext());
-            uiHandler.post(() -> {
-                if (snap != null) {
-                    SnapshotManager.saveSnapshot(getApplicationContext(), snap);
-                    displaySnapshot(snap);
-                    Toast.makeText(this, R.string.toast_collected, Toast.LENGTH_SHORT).show();
-                } else {
+            try {
+                LocationSnapshot snap = SnapshotManager.collectSnapshot(getApplicationContext());
+                uiHandler.post(() -> {
+                    if (snap != null) {
+                        SnapshotManager.saveSnapshot(getApplicationContext(), snap);
+                        displaySnapshot(snap);
+                        Toast.makeText(this, R.string.toast_collected, Toast.LENGTH_SHORT).show();
+                    } else {
+                        Toast.makeText(this, R.string.toast_collect_failed, Toast.LENGTH_SHORT).show();
+                    }
+                    btnCollect.setEnabled(true);
+                    btnCollect.setText(R.string.btn_collect);
+                });
+            } catch (Throwable t) {
+                uiHandler.post(() -> {
                     Toast.makeText(this, R.string.toast_collect_failed, Toast.LENGTH_SHORT).show();
-                }
-                btnCollect.setEnabled(true);
-                btnCollect.setText(R.string.btn_collect);
-            });
+                    btnCollect.setEnabled(true);
+                    btnCollect.setText(R.string.btn_collect);
+                });
+            }
         });
     }
 
@@ -191,22 +199,26 @@ public class MainActivity extends AppCompatActivity {
         sb.append("🏔 ").append(String.format(Locale.US, "%.1f m", s.altitude)).append("\n");
         sb.append("🕐 ").append(SDF.format(new Date(s.captureTime))).append("\n");
 
-        if (!s.wifiList.isEmpty()) {
+        if (s.wifiList != null && !s.wifiList.isEmpty()) {
             sb.append("\n📶 WiFi (").append(s.wifiList.size()).append(")\n");
             for (int i = 0; i < Math.min(3, s.wifiList.size()); i++) {
                 LocationSnapshot.WifiEntry w = s.wifiList.get(i);
-                sb.append("  ").append(w.ssid).append(" [").append(w.bssid).append("]")
+                if (w == null) continue;
+                sb.append("  ").append(w.ssid != null ? w.ssid : "?")
+                  .append(" [").append(w.bssid != null ? w.bssid : "?").append("]")
                   .append(" ").append(w.level).append(" dBm\n");
             }
             if (s.wifiList.size() > 3)
                 sb.append("  … ").append(s.wifiList.size() - 3).append(" more\n");
         }
 
-        if (!s.cellList.isEmpty()) {
+        if (s.cellList != null && !s.cellList.isEmpty()) {
             sb.append("\n📡 Cell (").append(s.cellList.size()).append(")\n");
             for (int i = 0; i < Math.min(2, s.cellList.size()); i++) {
                 LocationSnapshot.CellEntry c = s.cellList.get(i);
-                sb.append("  ").append(c.type).append(" MCC=").append(c.mcc)
+                if (c == null) continue;
+                sb.append("  ").append(c.type != null ? c.type : "?")
+                  .append(" MCC=").append(c.mcc)
                   .append(" MNC=").append(c.mnc)
                   .append(" CID=").append(c.cid)
                   .append(" ").append(c.dbm).append(" dBm\n");
