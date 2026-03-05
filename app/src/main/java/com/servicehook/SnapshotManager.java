@@ -133,7 +133,7 @@ public class SnapshotManager {
             LocationManager lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
             if (lm == null) return;
             Location loc = null;
-            Location altLoc = null; // track best location that has altitude
+            Location locationWithAltitude = null; // track best location that has altitude
             // Prefer GPS provider, fall back to network
             for (String provider : new String[]{LocationManager.GPS_PROVIDER,
                     LocationManager.NETWORK_PROVIDER, LocationManager.FUSED_PROVIDER}) {
@@ -141,8 +141,8 @@ public class SnapshotManager {
                     Location candidate = lm.getLastKnownLocation(provider);
                     if (candidate == null) continue;
                     if (loc == null) loc = candidate;
-                    if (candidate.hasAltitude() && altLoc == null) altLoc = candidate;
-                    if (loc != null && altLoc != null) break;
+                    if (candidate.hasAltitude() && locationWithAltitude == null) locationWithAltitude = candidate;
+                    if (loc != null && locationWithAltitude != null) break;
                 } catch (Throwable ignored) {
                 }
             }
@@ -155,8 +155,8 @@ public class SnapshotManager {
                 // Use altitude from the best source that actually has it
                 if (loc.hasAltitude()) {
                     snap.altitude = loc.getAltitude();
-                } else if (altLoc != null) {
-                    snap.altitude = altLoc.getAltitude();
+                } else if (locationWithAltitude != null) {
+                    snap.altitude = locationWithAltitude.getAltitude();
                 }
                 // altitude remains 0.0 if no provider reported it
             }

@@ -156,7 +156,7 @@ public class ProfileManager {
         // Fall back to legacy encrypted format
         if (json == null) {
             json = decrypt(ctx, content);
-            if (json == null) throw new Exception("Failed to parse import file");
+            if (json == null) throw new Exception("Import file is neither valid JSON nor legacy encrypted format");
         }
 
         Type type = new TypeToken<List<SnapshotProfile>>() {}.getType();
