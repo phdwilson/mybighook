@@ -56,4 +56,14 @@ public class LocationSnapshot {
         public int    dbm;   // Signal strength in dBm
         public int    earfcn; // Absolute RF channel number (LTE)
     }
+
+    /**
+     * Ensures that list fields are non-null after Gson deserialization,
+     * which can set initialised lists to {@code null} if the JSON contains
+     * an explicit {@code "wifiList": null} value.
+     */
+    public void ensureNonNullLists() {
+        if (wifiList == null) wifiList = new ArrayList<>();
+        if (cellList == null) cellList = new ArrayList<>();
+    }
 }

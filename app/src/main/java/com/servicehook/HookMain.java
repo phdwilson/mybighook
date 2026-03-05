@@ -150,7 +150,11 @@ public class HookMain implements IXposedHookLoadPackage {
                     StatsProvider.CMD_GET_SNAPSHOT, null, null);
             if (result != null && result.getBoolean(StatsProvider.KEY_ACTIVE, false)) {
                 String json = result.getString(StatsProvider.KEY_SNAPSHOT);
-                if (json != null) cachedSnap = GSON.fromJson(json, LocationSnapshot.class);
+                if (json != null) {
+                    LocationSnapshot snap = GSON.fromJson(json, LocationSnapshot.class);
+                    if (snap != null) snap.ensureNonNullLists();
+                    cachedSnap = snap;
+                }
             } else {
                 cachedSnap = null;
             }
@@ -385,7 +389,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         @Override
                         protected void afterHookedMethod(MethodHookParam p) {
                             LocationSnapshot s = getSnapshot();
-                            if (s == null || s.wifiList.isEmpty()) return;
+                            if (s == null || s.wifiList == null || s.wifiList.isEmpty()) return;
                             List<android.net.wifi.ScanResult> results = buildFakeScanResults(s);
                             if (!results.isEmpty()) {
                                 p.setResult(results);
@@ -404,7 +408,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         @Override
                         protected void afterHookedMethod(MethodHookParam p) {
                             LocationSnapshot s = getSnapshot();
-                            if (s == null || s.wifiList.isEmpty()) return;
+                            if (s == null || s.wifiList == null || s.wifiList.isEmpty()) return;
                             // Patch the returned WifiInfo in-place via reflection
                             Object info = p.getResult();
                             if (info == null) return;
@@ -419,22 +423,22 @@ public class HookMain implements IXposedHookLoadPackage {
     private void hookWifiInfo(ClassLoader cl) {
         hookWifiGetter(cl, "getSSID", () -> {
             LocationSnapshot s = getSnapshot();
-            if (s == null || s.wifiList.isEmpty()) return null;
+            if (s == null || s.wifiList == null || s.wifiList.isEmpty()) return null;
             return "\"" + s.wifiList.get(0).ssid + "\"";
         });
         hookWifiGetter(cl, "getBSSID", () -> {
             LocationSnapshot s = getSnapshot();
-            if (s == null || s.wifiList.isEmpty()) return null;
+            if (s == null || s.wifiList == null || s.wifiList.isEmpty()) return null;
             return s.wifiList.get(0).bssid;
         });
         hookWifiGetter(cl, "getRssi", () -> {
             LocationSnapshot s = getSnapshot();
-            if (s == null || s.wifiList.isEmpty()) return null;
+            if (s == null || s.wifiList == null || s.wifiList.isEmpty()) return null;
             return s.wifiList.get(0).level + wifiNoise(s.wifiList.get(0).bssid);
         });
         hookWifiGetter(cl, "getFrequency", () -> {
             LocationSnapshot s = getSnapshot();
-            if (s == null || s.wifiList.isEmpty()) return null;
+            if (s == null || s.wifiList == null || s.wifiList.isEmpty()) return null;
             return s.wifiList.get(0).frequency;
         });
     }
@@ -555,7 +559,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         @Override
                         protected void afterHookedMethod(MethodHookParam p) {
                             LocationSnapshot s = getSnapshot();
-                            if (s == null || s.cellList.isEmpty()) return;
+                            if (s == null || s.cellList == null || s.cellList.isEmpty()) return;
                             List<android.telephony.CellInfo> fake = buildFakeCellInfoList(s);
                             if (!fake.isEmpty()) {
                                 p.setResult(fake);
@@ -574,7 +578,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         @Override
                         protected void afterHookedMethod(MethodHookParam p) {
                             LocationSnapshot s = getSnapshot();
-                            if (s == null || s.cellList.isEmpty()) return;
+                            if (s == null || s.cellList == null || s.cellList.isEmpty()) return;
                             LocationSnapshot.CellEntry c = s.cellList.get(0);
                             p.setResult(String.format("%03d%02d", c.mcc, c.mnc));
                         }
@@ -595,7 +599,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam p) {
                             LocationSnapshot s = getSnapshot();
-                            if (s == null || s.cellList.isEmpty()) return;
+                            if (s == null || s.cellList == null || s.cellList.isEmpty()) return;
                             List<android.telephony.CellInfo> fake = buildFakeCellInfoList(s);
                             if (!fake.isEmpty()) p.args[0] = fake;
                         }
@@ -620,7 +624,7 @@ public class HookMain implements IXposedHookLoadPackage {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam p) {
                             LocationSnapshot s = getSnapshot();
-                            if (s == null || s.cellList.isEmpty()) return;
+                            if (s == null || s.cellList == null || s.cellList.isEmpty()) return;
                             List<android.telephony.CellInfo> fake = buildFakeCellInfoList(s);
                             if (!fake.isEmpty()) p.args[0] = fake;
                         }
