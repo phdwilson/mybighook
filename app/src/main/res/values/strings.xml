@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">ServiceHook</string>
+    <string name="module_description">Multi-dimensional location privacy protection</string>
+
+    <!-- Module status -->
+    <string name="status_active">✅ Module Active</string>
+    <string name="status_inactive">❌ Module Inactive — Enable in LSPosed Manager</string>
+
+    <!-- Buttons -->
+    <string name="btn_collect">📥 Collect Snapshot</string>
+    <string name="btn_collecting">Collecting…</string>
+    <string name="btn_activate">🛡 Activate Protection</string>
+    <string name="btn_deactivate">⏹ Deactivate</string>
+
+    <!-- Toasts -->
+    <string name="toast_collected">Snapshot collected and activated</string>
+    <string name="toast_collect_failed">Could not get location — check permissions</string>
+    <string name="toast_no_snapshot">Collect a snapshot first</string>
+
+    <!-- Display -->
+    <string name="no_snapshot">No snapshot collected yet.\nTap "Collect Snapshot" to start.</string>
+    <string name="stats_unavailable">Stats unavailable</string>
+    <string name="hook_active">🟢 Hook active</string>
+    <string name="hook_inactive">🔴 Hook inactive</string>
+
+    <!-- Section headers -->
+    <string name="section_snapshot">Current Snapshot</string>
+    <string name="section_stats">Intercept Statistics</string>
+</resources>

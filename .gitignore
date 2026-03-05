@@ -1,0 +1,19 @@
+# Build output
+build/
+.gradle/
+local.properties
+*.ap_
+*.dex
+*.class
+proguard/
+release/
+*.jks
+*.keystore
+
+# Android Studio / IDE
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
