@@ -7,6 +7,9 @@
 # Keep ContentProvider
 -keep class com.servicehook.StatsProvider { *; }
 
+# Keep ProfileManager (used by reflection from Gson TypeToken)
+-keep class com.servicehook.ProfileManager { *; }
+
 # Keep MainActivity public API (isModuleActive must survive)
 -keep class com.servicehook.MainActivity {
     public static boolean isModuleActive();

@@ -1,12 +1,18 @@
 package com.servicehook;
 
 import android.Manifest;
+import android.app.AlertDialog;
+import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.view.LayoutInflater;
 import android.view.View;
 import android.widget.Button;
+import android.widget.EditText;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
@@ -16,9 +22,13 @@ import androidx.core.content.ContextCompat;
 
 import com.google.gson.Gson;
 import com.servicehook.model.LocationSnapshot;
+import com.servicehook.model.SnapshotProfile;
 
+import java.io.InputStream;
+import java.io.OutputStream;
 import java.text.SimpleDateFormat;
 import java.util.Date;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -31,11 +41,15 @@ import java.util.concurrent.Executors;
  * • Module-active badge  – green if LSPosed has loaded this module, red otherwise.
  * • Snapshot card        – shows the currently stored snapshot (lat/lon, WiFi, cell).
  * • Action buttons       – Collect (grab current environment) and Activate/Deactivate.
+ * • Saved profiles       – list of named profiles with activate/delete controls.
+ * • Export / Import      – backup and restore profiles to encrypted files.
  * • Intercept counters   – live counts from the ContentProvider (refreshed every 3 s).
  */
 public class MainActivity extends AppCompatActivity {
 
-    private static final int REQ_PERMISSIONS = 42;
+    private static final int REQ_PERMISSIONS  = 42;
+    private static final int REQ_EXPORT_FILE  = 100;
+    private static final int REQ_IMPORT_FILE  = 101;
     private static final long STATS_REFRESH_INTERVAL_MS = 3_000L;
     private static final String[] REQUIRED_PERMISSIONS = {
             Manifest.permission.ACCESS_FINE_LOCATION,
@@ -52,11 +66,16 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvModuleStatus;
     private TextView tvSnapshotInfo;
     private TextView tvStats;
+    private TextView tvNoProfiles;
     private Button   btnCollect;
     private Button   btnActivate;
+    private Button   btnExport;
+    private Button   btnImport;
+    private LinearLayout llProfilesContainer;
 
     // ── State ─────────────────────────────────────────────────────────────────
     private boolean isActive = false;
+    private String  activeProfileId = null;
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable statsRefreshRunnable = this::refreshStats;
@@ -68,17 +87,24 @@ public class MainActivity extends AppCompatActivity {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
 
-        tvModuleStatus = findViewById(R.id.tv_module_status);
-        tvSnapshotInfo = findViewById(R.id.tv_snapshot_info);
-        tvStats        = findViewById(R.id.tv_stats);
-        btnCollect     = findViewById(R.id.btn_collect);
-        btnActivate    = findViewById(R.id.btn_activate);
+        tvModuleStatus      = findViewById(R.id.tv_module_status);
+        tvSnapshotInfo      = findViewById(R.id.tv_snapshot_info);
+        tvStats             = findViewById(R.id.tv_stats);
+        tvNoProfiles        = findViewById(R.id.tv_no_profiles);
+        btnCollect          = findViewById(R.id.btn_collect);
+        btnActivate         = findViewById(R.id.btn_activate);
+        btnExport           = findViewById(R.id.btn_export);
+        btnImport           = findViewById(R.id.btn_import);
+        llProfilesContainer = findViewById(R.id.ll_profiles_container);
 
         btnCollect.setOnClickListener(v -> collectSnapshot());
         btnActivate.setOnClickListener(v -> toggleActivation());
+        btnExport.setOnClickListener(v -> startExport());
+        btnImport.setOnClickListener(v -> startImport());
 
         checkModuleActive();
         loadAndDisplaySnapshot();
+        refreshProfileList();
         requestPermissionsIfNeeded();
 
         // On startup, push any previously-saved snapshot to the live provider
@@ -137,7 +163,7 @@ public class MainActivity extends AppCompatActivity {
                     if (snap != null) {
                         SnapshotManager.saveSnapshot(getApplicationContext(), snap);
                         displaySnapshot(snap);
-                        Toast.makeText(this, R.string.toast_collected, Toast.LENGTH_SHORT).show();
+                        showSaveProfileDialog(snap);
                     } else {
                         Toast.makeText(this, R.string.toast_collect_failed, Toast.LENGTH_SHORT).show();
                     }
@@ -154,13 +180,41 @@ public class MainActivity extends AppCompatActivity {
         });
     }
 
+    /**
+     * After collecting a snapshot, prompt the user to name and save it as a profile.
+     */
+    private void showSaveProfileDialog(LocationSnapshot snap) {
+        EditText input = new EditText(this);
+        input.setHint(R.string.dialog_save_hint);
+        input.setTextColor(0xFFFFFFFF);
+        input.setHintTextColor(0xFF888888);
+
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.dialog_save_title)
+                .setView(input)
+                .setPositiveButton(R.string.dialog_save_ok, (dialog, which) -> {
+                    String name = input.getText().toString().trim();
+                    if (name.isEmpty()) {
+                        name = SDF.format(new Date(snap.captureTime));
+                    }
+                    SnapshotProfile profile = new SnapshotProfile(name, snap);
+                    ProfileManager.addProfile(getApplicationContext(), profile);
+                    Toast.makeText(this, R.string.toast_profile_saved, Toast.LENGTH_SHORT).show();
+                    refreshProfileList();
+                })
+                .setNegativeButton(R.string.dialog_save_cancel, null)
+                .show();
+    }
+
     // ── Activation toggle ─────────────────────────────────────────────────────
 
     private void toggleActivation() {
         if (isActive) {
             SnapshotManager.deactivate(getApplicationContext());
             isActive = false;
+            activeProfileId = null;
             btnActivate.setText(R.string.btn_activate);
+            refreshProfileList();
         } else {
             LocationSnapshot existing = SnapshotManager.loadSnapshot(getApplicationContext());
             if (existing == null) {
@@ -174,6 +228,16 @@ public class MainActivity extends AppCompatActivity {
         updateActivateButton();
     }
 
+    private void activateProfile(SnapshotProfile profile) {
+        SnapshotManager.saveSnapshot(getApplicationContext(), profile.snapshot);
+        isActive = true;
+        activeProfileId = profile.id;
+        displaySnapshot(profile.snapshot);
+        updateActivateButton();
+        refreshProfileList();
+        Toast.makeText(this, R.string.toast_profile_activated, Toast.LENGTH_SHORT).show();
+    }
+
     private void updateActivateButton() {
         if (isActive) {
             btnActivate.setBackgroundResource(R.drawable.bg_btn_danger);
@@ -182,6 +246,154 @@ public class MainActivity extends AppCompatActivity {
             btnActivate.setBackgroundResource(R.drawable.bg_btn_primary);
             btnActivate.setText(R.string.btn_activate);
         }
+    }
+
+    // ── Profile list ──────────────────────────────────────────────────────────
+
+    private void refreshProfileList() {
+        llProfilesContainer.removeAllViews();
+        List<SnapshotProfile> profiles = ProfileManager.loadAll(getApplicationContext());
+
+        if (profiles.isEmpty()) {
+            tvNoProfiles.setVisibility(View.VISIBLE);
+            return;
+        }
+        tvNoProfiles.setVisibility(View.GONE);
+
+        LayoutInflater inflater = LayoutInflater.from(this);
+        for (SnapshotProfile profile : profiles) {
+            if (profile == null) continue;
+            View itemView = inflater.inflate(R.layout.item_profile, llProfilesContainer, false);
+            bindProfileItem(itemView, profile);
+            llProfilesContainer.addView(itemView);
+        }
+    }
+
+    private void bindProfileItem(View itemView, SnapshotProfile profile) {
+        TextView tvName    = itemView.findViewById(R.id.tv_profile_name);
+        TextView tvDetails = itemView.findViewById(R.id.tv_profile_details);
+        Button   btnAct    = itemView.findViewById(R.id.btn_profile_activate);
+        Button   btnDel    = itemView.findViewById(R.id.btn_profile_delete);
+        View     root      = itemView.findViewById(R.id.profile_item_root);
+
+        tvName.setText(profile.name != null ? profile.name : "Unnamed");
+
+        StringBuilder details = new StringBuilder();
+        if (profile.snapshot != null) {
+            details.append(String.format(Locale.US, "%.4f, %.4f",
+                    profile.snapshot.latitude, profile.snapshot.longitude));
+        }
+        details.append("  •  ").append(SDF.format(new Date(profile.createdAt)));
+        tvDetails.setText(details);
+
+        boolean isThisActive = isActive && profile.id != null && profile.id.equals(activeProfileId);
+        if (isThisActive) {
+            root.setBackgroundResource(R.drawable.bg_profile_item_active);
+            btnAct.setText("⏹");
+            btnAct.setBackgroundResource(R.drawable.bg_btn_danger);
+        } else {
+            root.setBackgroundResource(R.drawable.bg_profile_item);
+            btnAct.setText("▶");
+            btnAct.setBackgroundResource(R.drawable.bg_btn_primary);
+        }
+
+        btnAct.setOnClickListener(v -> {
+            if (isThisActive) {
+                toggleActivation(); // deactivate
+            } else {
+                activateProfile(profile);
+            }
+        });
+
+        btnDel.setOnClickListener(v -> showDeleteDialog(profile));
+    }
+
+    private void showDeleteDialog(SnapshotProfile profile) {
+        new AlertDialog.Builder(this)
+                .setTitle(R.string.dialog_delete_title)
+                .setMessage(String.format(getString(R.string.dialog_delete_message),
+                        profile.name != null ? profile.name : "Unnamed"))
+                .setPositiveButton(android.R.string.ok, (dialog, which) -> {
+                    ProfileManager.deleteProfile(getApplicationContext(), profile.id);
+                    if (profile.id != null && profile.id.equals(activeProfileId)) {
+                        SnapshotManager.deactivate(getApplicationContext());
+                        isActive = false;
+                        activeProfileId = null;
+                        updateActivateButton();
+                    }
+                    Toast.makeText(this, R.string.toast_profile_deleted, Toast.LENGTH_SHORT).show();
+                    refreshProfileList();
+                })
+                .setNegativeButton(android.R.string.cancel, null)
+                .show();
+    }
+
+    // ── Export / Import ────────────────────────────────────────────────────────
+
+    private void startExport() {
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("application/octet-stream");
+        intent.putExtra(Intent.EXTRA_TITLE, "servicehook_profiles.enc");
+        startActivityForResult(intent, REQ_EXPORT_FILE);
+    }
+
+    private void startImport() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("*/*");
+        startActivityForResult(intent, REQ_IMPORT_FILE);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (resultCode != RESULT_OK || data == null || data.getData() == null) return;
+
+        Uri uri = data.getData();
+        if (requestCode == REQ_EXPORT_FILE) {
+            handleExport(uri);
+        } else if (requestCode == REQ_IMPORT_FILE) {
+            handleImport(uri);
+        }
+    }
+
+    private void handleExport(Uri uri) {
+        executor.execute(() -> {
+            try {
+                OutputStream out = getContentResolver().openOutputStream(uri);
+                if (out != null) {
+                    ProfileManager.exportProfiles(getApplicationContext(), out);
+                    out.close();
+                    uiHandler.post(() ->
+                            Toast.makeText(this, R.string.toast_export_ok, Toast.LENGTH_SHORT).show());
+                }
+            } catch (Throwable t) {
+                uiHandler.post(() ->
+                        Toast.makeText(this, R.string.toast_export_fail, Toast.LENGTH_SHORT).show());
+            }
+        });
+    }
+
+    private void handleImport(Uri uri) {
+        executor.execute(() -> {
+            try {
+                InputStream in = getContentResolver().openInputStream(uri);
+                if (in != null) {
+                    int count = ProfileManager.importProfiles(getApplicationContext(), in);
+                    in.close();
+                    uiHandler.post(() -> {
+                        Toast.makeText(this,
+                                String.format(getString(R.string.toast_import_ok), count),
+                                Toast.LENGTH_SHORT).show();
+                        refreshProfileList();
+                    });
+                }
+            } catch (Throwable t) {
+                uiHandler.post(() ->
+                        Toast.makeText(this, R.string.toast_import_fail, Toast.LENGTH_SHORT).show());
+            }
+        });
     }
 
     // ── Snapshot display ──────────────────────────────────────────────────────
