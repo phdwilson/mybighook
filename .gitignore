@@ -1,0 +1,23 @@
+# Build output
+build/
+.gradle/
+local.properties
+*.iml
+.idea/
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Android Studio
+*.ap_
+*.dex
+*.class
+proguard/
+release/
+*.jks
+*.keystore
+
+# Gradle wrapper binaries (keep properties, exclude binaries)
+gradle/wrapper/gradle-wrapper.jar
+gradlew
+gradlew.bat
