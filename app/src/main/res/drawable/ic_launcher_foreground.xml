@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- Shield outline -->
+    <path
+        android:fillColor="#00BCD4"
+        android:pathData="M54,22L30,36V54C30,69.9 38.46,84.6 54,88C69.54,84.6 78,69.9 78,54V36L54,22ZM54,27.84L72,37.5V54C72,67.04 65.22,78.98 54,82.58C42.78,78.98 36,67.04 36,54V37.5L54,27.84Z" />
+    <!-- Location pin inside shield -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M54,38C49.04,38 45,42.04 45,47C45,54.5 54,65 54,65S63,54.5 63,47C63,42.04 58.96,38 54,38ZM54,51.6C52.02,51.6 50.4,49.98 50.4,48C50.4,46.02 52.02,44.4 54,44.4C55.98,44.4 57.6,46.02 57.6,48C57.6,49.98 55.98,51.6 54,51.6Z" />
+</vector>

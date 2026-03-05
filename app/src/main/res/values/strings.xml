@@ -12,19 +12,38 @@
     <string name="btn_collecting">Collecting…</string>
     <string name="btn_activate">🛡 Activate Protection</string>
     <string name="btn_deactivate">⏹ Deactivate</string>
+    <string name="btn_export">📤 Export</string>
+    <string name="btn_import">📥 Import</string>
 
     <!-- Toasts -->
     <string name="toast_collected">Snapshot collected and activated</string>
     <string name="toast_collect_failed">Could not get location — check permissions</string>
     <string name="toast_no_snapshot">Collect a snapshot first</string>
+    <string name="toast_profile_saved">Profile saved</string>
+    <string name="toast_profile_deleted">Profile deleted</string>
+    <string name="toast_profile_activated">Profile activated</string>
+    <string name="toast_export_ok">Profiles exported successfully</string>
+    <string name="toast_export_fail">Export failed</string>
+    <string name="toast_import_ok">Imported %d profile(s)</string>
+    <string name="toast_import_fail">Import failed — file may be from a different device</string>
 
     <!-- Display -->
     <string name="no_snapshot">No snapshot collected yet.\nTap "Collect Snapshot" to start.</string>
     <string name="stats_unavailable">Stats unavailable</string>
     <string name="hook_active">🟢 Hook active</string>
     <string name="hook_inactive">🔴 Hook inactive</string>
+    <string name="no_profiles">No saved profiles yet</string>
 
     <!-- Section headers -->
     <string name="section_snapshot">Current Snapshot</string>
     <string name="section_stats">Intercept Statistics</string>
+    <string name="section_profiles">Saved Profiles</string>
+
+    <!-- Dialog -->
+    <string name="dialog_save_title">Save Profile</string>
+    <string name="dialog_save_hint">Profile name (e.g. Home, Office)</string>
+    <string name="dialog_save_ok">Save</string>
+    <string name="dialog_save_cancel">Cancel</string>
+    <string name="dialog_delete_title">Delete Profile</string>
+    <string name="dialog_delete_message">Delete profile \"%s\"?</string>
 </resources>

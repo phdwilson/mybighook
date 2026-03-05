@@ -7,6 +7,9 @@
 # Keep ContentProvider
 -keep class com.servicehook.StatsProvider { *; }
 
+# Keep ProfileManager (encryption methods needed at runtime)
+-keep class com.servicehook.ProfileManager { *; }
+
 # Keep MainActivity public API (isModuleActive must survive)
 -keep class com.servicehook.MainActivity {
     public static boolean isModuleActive();

@@ -12,8 +12,15 @@ import com.servicehook.model.LocationSnapshot;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Field;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
 import de.robv.android.xposed.XC_MethodHook;
@@ -42,17 +49,36 @@ import de.robv.android.xposed.callbacks.XC_LoadPackage;
 public class HookMain implements IXposedHookLoadPackage {
 
     private static final String TAG = "SH";
-    private static final long SNAPSHOT_CACHE_MS = 5_000L;
+    private static final long SNAPSHOT_CACHE_MS = 15_000L;
     private static final Gson GSON = new Gson();
 
     private static final int BASE_SATELLITE_COUNT     = 10;
     private static final int SATELLITE_COUNT_VARIANCE = 5;
+    private static final long REPORT_THROTTLE_MS = 30_000L;
+
+    private static final Set<String> SKIP_PACKAGES = Collections.unmodifiableSet(
+            new HashSet<>(Arrays.asList(
+                    "com.android.systemui",
+                    "com.android.phone",
+                    "com.android.providers.telephony",
+                    "com.android.server.telecom",
+                    "com.android.incallui",
+                    "com.android.nfc",
+                    "com.android.bluetooth",
+                    "com.android.se"
+            )));
 
     // ── Per-process state (each hooked process has its own instance) ──────────
     private android.content.Context appCtx = null;
     private volatile LocationSnapshot cachedSnap = null;
     private volatile long lastCacheRefresh = 0L;
     private final Random rng = new Random();
+    private final ConcurrentHashMap<String, Long> lastReportTime = new ConcurrentHashMap<>();
+    private final ExecutorService reportExecutor = Executors.newSingleThreadExecutor(r -> {
+        Thread t = new Thread(r, "SH-report");
+        t.setDaemon(true);
+        return t;
+    });
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -66,8 +92,9 @@ public class HookMain implements IXposedHookLoadPackage {
             return;
         }
 
-        // Skip system_server – hooks there risk system-wide instability
+        // Skip system_server and system-critical packages – hooks there risk instability
         if ("android".equals(lpparam.packageName)) return;
+        if (SKIP_PACKAGES.contains(lpparam.packageName)) return;
 
         // Capture context as early as possible so later hooks can reach the provider
         hookApplicationOnCreate(lpparam.classLoader);
@@ -166,16 +193,27 @@ public class HookMain implements IXposedHookLoadPackage {
         return cachedSnap;
     }
 
-    /** Send an async increment to the provider (fire-and-forget, best effort). */
+    /** Send a throttled, non-blocking increment to the provider (fire-and-forget, best effort). */
     private void report(String category) {
+        long now = SystemClock.elapsedRealtime();
+        Long last = lastReportTime.get(category);
+        if (last != null && (now - last) < REPORT_THROTTLE_MS) return;
+        // CAS-style: only proceed if we are the thread that sets the new timestamp
+        if (last == null) {
+            if (lastReportTime.putIfAbsent(category, now) != null) return;
+        } else {
+            if (!lastReportTime.replace(category, last, now)) return;
+        }
         android.content.Context ctx = appCtx;
         if (ctx == null) return;
-        try {
-            ctx.getContentResolver().call(
-                    Uri.parse("content://" + StatsProvider.AUTHORITY),
-                    StatsProvider.CMD_REPORT, category, null);
-        } catch (Throwable ignored) {
-        }
+        reportExecutor.execute(() -> {
+            try {
+                ctx.getContentResolver().call(
+                        Uri.parse("content://" + StatsProvider.AUTHORITY),
+                        StatsProvider.CMD_REPORT, category, null);
+            } catch (Throwable ignored) {
+            }
+        });
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -814,7 +852,7 @@ public class HookMain implements IXposedHookLoadPackage {
                     new XC_MethodHook() {
                         @Override
                         protected void beforeHookedMethod(MethodHookParam p) {
-                            if (getSnapshot() == null) return; // only when active
+                            if (cachedSnap == null) return; // only when active (avoid IPC on sensor hot path)
                             float[] values = (float[]) p.args[1];
                             if (values == null || values.length == 0) return;
                             int handle = (int) p.args[0];
