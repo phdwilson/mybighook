@@ -34,6 +34,8 @@ public class SnapshotManager {
 
     private static final String PREFS_NAME   = "sh_prefs";
     private static final String KEY_SNAPSHOT = "active_snapshot";
+    private static final int    MAX_WIFI_APS    = 10;
+    private static final int    MAX_CELL_TOWERS = 6;
 
     private static final Gson GSON = new Gson();
 
@@ -169,7 +171,7 @@ public class SnapshotManager {
             List<ScanResult> scanResults = wm.getScanResults();
             if (scanResults != null) {
                 for (ScanResult sr : scanResults) {
-                    if (snap.wifiList.size() >= 10) break; // cap at 10 APs
+                    if (snap.wifiList.size() >= MAX_WIFI_APS) break;
                     // Skip if we already added the connected network
                     if (!snap.wifiList.isEmpty()
                             && sr.BSSID.equalsIgnoreCase(snap.wifiList.get(0).bssid)) {
@@ -197,7 +199,7 @@ public class SnapshotManager {
             if (cells == null) return;
 
             for (CellInfo ci : cells) {
-                if (snap.cellList.size() >= 6) break;
+                if (snap.cellList.size() >= MAX_CELL_TOWERS) break;
                 LocationSnapshot.CellEntry entry = parseCellInfo(ci);
                 if (entry != null) snap.cellList.add(entry);
             }
@@ -333,10 +335,14 @@ public class SnapshotManager {
     }
 
     private static int parseMcc(String s) {
-        try { return Integer.parseInt(s); } catch (Exception e) { return 0; }
+        return parseIntOrDefault(s, 0);
     }
 
     private static int parseMnc(String s) {
-        try { return Integer.parseInt(s); } catch (Exception e) { return 0; }
+        return parseIntOrDefault(s, 0);
+    }
+
+    private static int parseIntOrDefault(String s, int defaultValue) {
+        try { return Integer.parseInt(s); } catch (Exception e) { return defaultValue; }
     }
 }

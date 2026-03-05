@@ -44,6 +44,9 @@ public class HookMain implements IXposedHookLoadPackage {
     private static final long SNAPSHOT_CACHE_MS = 5_000L;
     private static final Gson GSON = new Gson();
 
+    private static final int BASE_SATELLITE_COUNT     = 10;
+    private static final int SATELLITE_COUNT_VARIANCE = 5;
+
     // ── Per-process state (each hooked process has its own instance) ──────────
     private android.content.Context appCtx = null;
     private volatile LocationSnapshot cachedSnap = null;
@@ -279,7 +282,7 @@ public class HookMain implements IXposedHookLoadPackage {
                             if (extras == null) extras = new android.os.Bundle();
                             else extras = new android.os.Bundle(extras);
                             // Typical GPS fix has 8–14 satellites
-                            extras.putInt("satellites", 10 + rng.nextInt(5));
+                            extras.putInt("satellites", BASE_SATELLITE_COUNT + rng.nextInt(SATELLITE_COUNT_VARIANCE));
                             p.setResult(extras);
                         }
                     });
@@ -346,7 +349,7 @@ public class HookMain implements IXposedHookLoadPackage {
         loc.setTime(System.currentTimeMillis());
         loc.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
         android.os.Bundle extras = new android.os.Bundle();
-        extras.putInt("satellites", 10 + rng.nextInt(5));
+        extras.putInt("satellites", BASE_SATELLITE_COUNT + rng.nextInt(SATELLITE_COUNT_VARIANCE));
         loc.setExtras(extras);
         // Clear mock flag via reflection
         clearMockFlag(loc);
@@ -797,7 +800,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 // Simulate breathing-induced micro-movement (~0.03 Hz, 0.04 m/s²)
                 double drift = 0.04 * Math.sin(t * 0.03 * 2 * Math.PI);
                 for (int i = 0; i < Math.min(3, v.length); i++) {
-                    v[i] += drift * Math.cos(i * 1.2) + (float)(rng.nextGaussian() * 0.005);
+                    v[i] += (float)(drift * Math.cos(i * 1.2) + rng.nextGaussian() * 0.005);
                 }
                 break;
             }
@@ -805,21 +808,21 @@ public class HookMain implements IXposedHookLoadPackage {
                 // Zero-rate offset drift typical of MEMS gyros (~0.001 rad/s)
                 double drift = 0.001 * Math.sin(t * 0.01 * 2 * Math.PI);
                 for (int i = 0; i < Math.min(3, v.length); i++) {
-                    v[i] += drift + (float)(rng.nextGaussian() * 0.0003);
+                    v[i] += (float)(drift + rng.nextGaussian() * 0.0003);
                 }
                 break;
             }
             case Sensor.TYPE_MAGNETIC_FIELD: {
                 double drift = 0.3 * Math.sin(t * 0.05 * 2 * Math.PI);
                 for (int i = 0; i < Math.min(3, v.length); i++) {
-                    v[i] += drift * Math.sin(i + 1.0) + (float)(rng.nextGaussian() * 0.05);
+                    v[i] += (float)(drift * Math.sin(i + 1.0) + rng.nextGaussian() * 0.05);
                 }
                 break;
             }
             case Sensor.TYPE_PRESSURE: {
                 // Barometric micro-fluctuation (~0.02 hPa, period ~10 s)
-                v[0] += 0.02 * Math.sin(t * 0.1 * 2 * Math.PI)
-                        + (float)(rng.nextGaussian() * 0.005);
+                v[0] += (float)(0.02 * Math.sin(t * 0.1 * 2 * Math.PI)
+                        + rng.nextGaussian() * 0.005);
                 break;
             }
             default: {
@@ -860,9 +863,9 @@ public class HookMain implements IXposedHookLoadPackage {
     private int wifiNoise(String bssid) {
         double t = SystemClock.elapsedRealtime() / 1000.0;
         double phase = (bssid != null ? (bssid.hashCode() & 0xFFFFF) : 0) * 0.0001;
-        int sin  = (int)(2.0 * Math.sin(t * 2 * Math.PI / 18.0 + phase));
-        int gaus = (int)(rng.nextGaussian() * 0.8);
-        return sin + gaus;
+        int sinusoidalDrift  = (int)(2.0 * Math.sin(t * 2 * Math.PI / 18.0 + phase));
+        int gaussianJitter   = (int)(rng.nextGaussian() * 0.8);
+        return sinusoidalDrift + gaussianJitter;
     }
 
     /** Cell signal noise: ±3 dBm sinusoidal (period ~25 s) + 1 dBm Gaussian. */

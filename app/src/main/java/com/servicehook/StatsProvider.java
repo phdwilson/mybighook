@@ -162,10 +162,13 @@ public class StatsProvider extends ContentProvider {
      * Throws {@link SecurityException} if the Binder caller is not root (UID 0),
      * system_server (UID 1000), or our own app process.
      */
+    private static final int ROOT_UID          = 0;
+    private static final int SYSTEM_SERVER_UID = 1000;
+
     private void requireAdminUid() {
         int callerUid = Binder.getCallingUid();
         int ownUid    = Process.myUid();
-        if (callerUid != 0 && callerUid != 1000 && callerUid != ownUid) {
+        if (callerUid != ROOT_UID && callerUid != SYSTEM_SERVER_UID && callerUid != ownUid) {
             throw new SecurityException("StatsProvider: access denied for UID " + callerUid);
         }
     }

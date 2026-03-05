@@ -36,6 +36,7 @@ import java.util.concurrent.Executors;
 public class MainActivity extends AppCompatActivity {
 
     private static final int REQ_PERMISSIONS = 42;
+    private static final long STATS_REFRESH_INTERVAL_MS = 3_000L;
     private static final String[] REQUIRED_PERMISSIONS = {
             Manifest.permission.ACCESS_FINE_LOCATION,
             Manifest.permission.ACCESS_COARSE_LOCATION,
@@ -227,7 +228,7 @@ public class MainActivity extends AppCompatActivity {
             Bundle stats = SnapshotManager.queryStats(getApplicationContext());
             uiHandler.post(() -> {
                 displayStats(stats);
-                uiHandler.postDelayed(statsRefreshRunnable, 3_000);
+                uiHandler.postDelayed(statsRefreshRunnable, STATS_REFRESH_INTERVAL_MS);
             });
         });
     }
