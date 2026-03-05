@@ -2,6 +2,7 @@ package com.servicehook;
 
 import android.hardware.Sensor;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
 
@@ -467,17 +468,23 @@ public class HookMain implements IXposedHookLoadPackage {
         return list;
     }
 
+    @SuppressWarnings("deprecation")
     private android.net.wifi.ScanResult buildScanResult(String ssid, String bssid,
                                                          String caps, int level,
                                                          int freq, long tsUs) {
         try {
             android.net.wifi.ScanResult sr = new android.net.wifi.ScanResult();
+            // Set legacy SSID string field (present in all API levels, deprecated API 33+)
             setField(sr, "SSID", ssid);
             setField(sr, "BSSID", bssid);
             setField(sr, "capabilities", caps);
             setField(sr, "level", level);
             setField(sr, "frequency", freq);
             setField(sr, "timestamp", tsUs);
+            // API 33+: also set the WifiSsid object so non-deprecated accessors work
+            if (Build.VERSION.SDK_INT >= 33) {
+                setWifiSsidField(sr, ssid);
+            }
             return sr;
         } catch (Throwable ignored) {}
 
@@ -492,11 +499,46 @@ public class HookMain implements IXposedHookLoadPackage {
         return null;
     }
 
+    /**
+     * Attempts to set the {@code android.net.wifi.WifiSsid} field on a
+     * {@link android.net.wifi.ScanResult} for API 33+ compatibility.
+     * The {@code WifiSsid} class can only be constructed via its static
+     * factory {@code fromUtf8Text(String)}.
+     */
+    private static void setWifiSsidField(android.net.wifi.ScanResult sr, String ssid) {
+        try {
+            Class<?> wifiSsidCls = Class.forName("android.net.wifi.WifiSsid");
+            java.lang.reflect.Method factory = wifiSsidCls.getDeclaredMethod("fromUtf8Text", String.class);
+            factory.setAccessible(true);
+            Object wifiSsid = factory.invoke(null, ssid);
+            // setField silently fails if the field doesn't exist on this ART version
+            setField(sr, "wifiSsid", wifiSsid);
+        } catch (Throwable ignored) {}
+    }
+
     private void patchWifiInfo(Object info, LocationSnapshot.WifiEntry entry) {
-        try { setField(info, "mSSID", entry.ssid); } catch (Throwable ignored) {}
+        int noisyRssi = entry.level + wifiNoise(entry.bssid);
+        // Try known field names across Android versions.
+        // WifiInfo.getSSID() returns the SSID surrounded by double-quotes (e.g. "\"MyNet\"")
+        // so we store it in the same format that Android's own getter produces.
+        // Android < 12: mSSID (quoted string), mBSSID, mRssi, mFrequency
+        // Android 12+:  also mWifiSsid (WifiSsid object)
+        try { setField(info, "mSSID", "\"" + entry.ssid + "\""); } catch (Throwable ignored) {}
         try { setField(info, "mBSSID", entry.bssid); } catch (Throwable ignored) {}
-        try { setField(info, "mRssi", entry.level + wifiNoise(entry.bssid)); } catch (Throwable ignored) {}
+        try { setField(info, "mRssi", noisyRssi); } catch (Throwable ignored) {}
         try { setField(info, "mFrequency", entry.frequency); } catch (Throwable ignored) {}
+        // Android 12+ (API 31+): the WifiSsid object that backs getWifiSsid()
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            try {
+                Class<?> wifiSsidCls = Class.forName("android.net.wifi.WifiSsid");
+                java.lang.reflect.Method factory =
+                        wifiSsidCls.getDeclaredMethod("fromUtf8Text", String.class);
+                factory.setAccessible(true);
+                Object wifiSsid = factory.invoke(null, entry.ssid);
+                // Use setField inside a try-catch for consistent error handling
+                try { setField(info, "mWifiSsid", wifiSsid); } catch (Throwable ignored) {}
+            } catch (Throwable ignored) {}
+        }
     }
 
     // ─────────────────────────────────────────────────────────────────────────

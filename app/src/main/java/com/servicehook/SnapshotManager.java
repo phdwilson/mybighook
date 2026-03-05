@@ -7,12 +7,12 @@ import android.hardware.SensorEvent;
 import android.hardware.SensorEventListener;
 import android.hardware.SensorManager;
 import android.location.Location;
-import android.location.LocationListener;
 import android.location.LocationManager;
 import android.net.Uri;
 import android.net.wifi.ScanResult;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
+import android.os.Build;
 import android.os.Bundle;
 import android.telephony.CellInfo;
 import android.telephony.CellInfoGsm;
@@ -178,7 +178,7 @@ public class SnapshotManager {
                         continue;
                     }
                     LocationSnapshot.WifiEntry entry = new LocationSnapshot.WifiEntry();
-                    entry.ssid     = sr.SSID;
+                    entry.ssid     = getScanResultSsid(sr);
                     entry.bssid    = sr.BSSID;
                     entry.level    = sr.level;
                     entry.frequency = sr.frequency;
@@ -332,6 +332,28 @@ public class SnapshotManager {
             return raw.substring(1, raw.length() - 1);
         }
         return raw;
+    }
+
+    /**
+     * Returns the SSID from a {@link ScanResult} in a forward-compatible way.
+     * {@link ScanResult#SSID} was deprecated in API 33 (Android 13); the
+     * replacement is {@link ScanResult#getWifiSsid()}, which returns a
+     * {@link android.net.wifi.WifiSsid} object introduced in the same API level.
+     */
+    @SuppressWarnings("deprecation")
+    private static String getScanResultSsid(ScanResult sr) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            // API 33+: use the non-deprecated WifiSsid accessor
+            android.net.wifi.WifiSsid wifiSsid = sr.getWifiSsid();
+            if (wifiSsid != null) {
+                // WifiSsid.toString() returns the UTF-8 text or hex if not printable
+                String s = wifiSsid.toString();
+                return (s != null) ? s : "";
+            }
+            return "";
+        }
+        // API < 33: SSID field is not deprecated on these versions
+        return (sr.SSID != null) ? sr.SSID : "";
     }
 
     private static int parseMcc(String s) {
