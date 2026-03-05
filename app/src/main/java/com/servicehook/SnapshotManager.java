@@ -132,23 +132,33 @@ public class SnapshotManager {
         try {
             LocationManager lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
             if (lm == null) return;
-            Location loc = null;
-            // Prefer GPS provider, fall back to network
+            // Try all providers and prefer the one with altitude data and best accuracy
+            Location bestLoc = null;
             for (String provider : new String[]{LocationManager.GPS_PROVIDER,
-                    LocationManager.NETWORK_PROVIDER, LocationManager.FUSED_PROVIDER}) {
+                    LocationManager.FUSED_PROVIDER, LocationManager.NETWORK_PROVIDER}) {
                 try {
-                    loc = lm.getLastKnownLocation(provider);
-                    if (loc != null) break;
+                    Location loc = lm.getLastKnownLocation(provider);
+                    if (loc == null) continue;
+                    if (bestLoc == null) {
+                        bestLoc = loc;
+                    } else if (loc.hasAltitude() && !bestLoc.hasAltitude()) {
+                        // Prefer a location that has altitude
+                        bestLoc = loc;
+                    } else if (loc.hasAltitude() == bestLoc.hasAltitude()
+                            && loc.getAccuracy() < bestLoc.getAccuracy()) {
+                        // Same altitude availability: prefer better accuracy
+                        bestLoc = loc;
+                    }
                 } catch (Throwable ignored) {
                 }
             }
-            if (loc != null) {
-                snap.latitude  = loc.getLatitude();
-                snap.longitude = loc.getLongitude();
-                snap.altitude  = loc.getAltitude();
-                snap.accuracy  = loc.getAccuracy();
-                snap.bearing   = loc.getBearing();
-                snap.speed     = loc.getSpeed();
+            if (bestLoc != null) {
+                snap.latitude  = bestLoc.getLatitude();
+                snap.longitude = bestLoc.getLongitude();
+                snap.altitude  = bestLoc.getAltitude();
+                snap.accuracy  = bestLoc.getAccuracy();
+                snap.bearing   = bestLoc.getBearing();
+                snap.speed     = bestLoc.getSpeed();
             }
         } catch (Throwable ignored) {
         }
