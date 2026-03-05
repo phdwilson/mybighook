@@ -360,11 +360,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void handleExport(Uri uri) {
         executor.execute(() -> {
-            try {
-                OutputStream out = getContentResolver().openOutputStream(uri);
+            try (OutputStream out = getContentResolver().openOutputStream(uri)) {
                 if (out != null) {
                     ProfileManager.exportProfiles(getApplicationContext(), out);
-                    out.close();
                     uiHandler.post(() ->
                             Toast.makeText(this, R.string.toast_export_ok, Toast.LENGTH_SHORT).show());
                 }
@@ -377,11 +375,9 @@ public class MainActivity extends AppCompatActivity {
 
     private void handleImport(Uri uri) {
         executor.execute(() -> {
-            try {
-                InputStream in = getContentResolver().openInputStream(uri);
+            try (InputStream in = getContentResolver().openInputStream(uri)) {
                 if (in != null) {
                     int count = ProfileManager.importProfiles(getApplicationContext(), in);
-                    in.close();
                     uiHandler.post(() -> {
                         Toast.makeText(this,
                                 String.format(getString(R.string.toast_import_ok), count),

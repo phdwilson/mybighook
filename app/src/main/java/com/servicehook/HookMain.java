@@ -196,9 +196,14 @@ public class HookMain implements IXposedHookLoadPackage {
     /** Send a throttled, non-blocking increment to the provider (fire-and-forget, best effort). */
     private void report(String category) {
         long now = SystemClock.elapsedRealtime();
-        Long prev = lastReportTime.compute(category, (k, last) ->
-                (last != null && (now - last) < REPORT_THROTTLE_MS) ? last : now);
-        if (prev != now) return; // another thread already updated, or throttled
+        Long last = lastReportTime.get(category);
+        if (last != null && (now - last) < REPORT_THROTTLE_MS) return;
+        // CAS-style: only proceed if we are the thread that sets the new timestamp
+        if (last == null) {
+            if (lastReportTime.putIfAbsent(category, now) != null) return;
+        } else {
+            if (!lastReportTime.replace(category, last, now)) return;
+        }
         android.content.Context ctx = appCtx;
         if (ctx == null) return;
         reportExecutor.execute(() -> {
