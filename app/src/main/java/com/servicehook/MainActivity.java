@@ -35,6 +35,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Main UI for ServiceHook.
@@ -82,6 +83,8 @@ public class MainActivity extends AppCompatActivity {
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private final Handler uiHandler = new Handler(Looper.getMainLooper());
     private final Runnable statsRefreshRunnable = this::refreshStats;
+    /** Guard against concurrent snapshot collection from rapid button taps. */
+    private final AtomicBoolean collecting = new AtomicBoolean(false);
 
     // ─────────────────────────────────────────────────────────────────────────
 
@@ -156,6 +159,7 @@ public class MainActivity extends AppCompatActivity {
     // ── Snapshot collect ──────────────────────────────────────────────────────
 
     private void collectSnapshot() {
+        if (!collecting.compareAndSet(false, true)) return; // debounce
         btnCollect.setEnabled(false);
         btnCollect.setText(R.string.btn_collecting);
 
@@ -163,6 +167,7 @@ public class MainActivity extends AppCompatActivity {
             try {
                 LocationSnapshot snap = SnapshotManager.collectSnapshot(getApplicationContext());
                 uiHandler.post(() -> {
+                    collecting.set(false);
                     if (snap != null) {
                         SnapshotManager.saveSnapshot(getApplicationContext(), snap);
                         displaySnapshot(snap);
@@ -175,6 +180,7 @@ public class MainActivity extends AppCompatActivity {
                 });
             } catch (Throwable t) {
                 uiHandler.post(() -> {
+                    collecting.set(false);
                     Toast.makeText(this, R.string.toast_collect_failed, Toast.LENGTH_SHORT).show();
                     btnCollect.setEnabled(true);
                     btnCollect.setText(R.string.btn_collect);

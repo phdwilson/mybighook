@@ -133,22 +133,32 @@ public class SnapshotManager {
             LocationManager lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
             if (lm == null) return;
             Location loc = null;
+            Location altLoc = null; // track best location that has altitude
             // Prefer GPS provider, fall back to network
             for (String provider : new String[]{LocationManager.GPS_PROVIDER,
                     LocationManager.NETWORK_PROVIDER, LocationManager.FUSED_PROVIDER}) {
                 try {
-                    loc = lm.getLastKnownLocation(provider);
-                    if (loc != null) break;
+                    Location candidate = lm.getLastKnownLocation(provider);
+                    if (candidate == null) continue;
+                    if (loc == null) loc = candidate;
+                    if (candidate.hasAltitude() && altLoc == null) altLoc = candidate;
+                    if (loc != null && altLoc != null) break;
                 } catch (Throwable ignored) {
                 }
             }
             if (loc != null) {
                 snap.latitude  = loc.getLatitude();
                 snap.longitude = loc.getLongitude();
-                snap.altitude  = loc.getAltitude();
                 snap.accuracy  = loc.getAccuracy();
                 snap.bearing   = loc.getBearing();
                 snap.speed     = loc.getSpeed();
+                // Use altitude from the best source that actually has it
+                if (loc.hasAltitude()) {
+                    snap.altitude = loc.getAltitude();
+                } else if (altLoc != null) {
+                    snap.altitude = altLoc.getAltitude();
+                }
+                // altitude remains 0.0 if no provider reported it
             }
         } catch (Throwable ignored) {
         }

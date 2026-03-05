@@ -26,12 +26,16 @@ import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
 
 /**
- * Manages multiple named snapshot profiles with AES-GCM encryption at rest.
- * Profiles are persisted in SharedPreferences as an encrypted JSON array.
+ * Manages multiple named snapshot profiles stored as plaintext JSON in
+ * SharedPreferences.  Encryption has been removed to improve reliability;
+ * existing encrypted data is transparently migrated on first load.
  */
 public class ProfileManager {
 
     private static final String PREFS_NAME    = "sh_profiles";
+    /** Key for plaintext profile storage. */
+    private static final String KEY_PROFILES_PLAIN = "profiles_plain";
+    /** Legacy key for encrypted profile storage (migration only). */
     private static final String KEY_PROFILES  = "encrypted_profiles";
     private static final String KEY_SECRET    = "profile_key";
     private static final String AES_ALGO      = "AES/GCM/NoPadding";
@@ -47,10 +51,23 @@ public class ProfileManager {
     public static List<SnapshotProfile> loadAll(Context ctx) {
         try {
             SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            String encrypted = prefs.getString(KEY_PROFILES, null);
-            if (encrypted == null) return new ArrayList<>();
-            String json = decrypt(ctx, encrypted);
-            if (json == null) return new ArrayList<>();
+
+            // Try plaintext storage first
+            String json = prefs.getString(KEY_PROFILES_PLAIN, null);
+
+            // Migration: fall back to legacy encrypted storage
+            if (json == null) {
+                String encrypted = prefs.getString(KEY_PROFILES, null);
+                if (encrypted == null) return new ArrayList<>();
+                json = decrypt(ctx, encrypted);
+                if (json == null) return new ArrayList<>();
+                // Migrate: save as plaintext and remove encrypted key
+                prefs.edit()
+                        .putString(KEY_PROFILES_PLAIN, json)
+                        .remove(KEY_PROFILES)
+                        .apply();
+            }
+
             Type type = new TypeToken<List<SnapshotProfile>>() {}.getType();
             List<SnapshotProfile> profiles = GSON.fromJson(json, type);
             if (profiles == null) return new ArrayList<>();
@@ -105,20 +122,20 @@ public class ProfileManager {
     }
 
     /**
-     * Export all profiles to the given OutputStream as encrypted JSON.
+     * Export all profiles to the given OutputStream as plaintext JSON.
      * The caller is responsible for closing the stream.
      */
     public static void exportProfiles(Context ctx, OutputStream out) throws Exception {
         List<SnapshotProfile> all = loadAll(ctx);
         String json = GSON.toJson(all);
-        String encrypted = encrypt(ctx, json);
         OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
-        writer.write(encrypted);
+        writer.write(json);
         writer.flush();
     }
 
     /**
-     * Import profiles from the given InputStream (expects encrypted JSON).
+     * Import profiles from the given InputStream (expects plaintext JSON;
+     * also accepts legacy encrypted format for backward compatibility).
      * Imported profiles are merged with existing ones (duplicates by id are skipped).
      */
     public static int importProfiles(Context ctx, InputStream in) throws Exception {
@@ -126,10 +143,21 @@ public class ProfileManager {
         StringBuilder sb = new StringBuilder();
         String line;
         while ((line = reader.readLine()) != null) sb.append(line);
-        String encrypted = sb.toString().trim();
+        String content = sb.toString().trim();
 
-        String json = decrypt(ctx, encrypted);
-        if (json == null) throw new Exception("Decryption failed");
+        // Try parsing as plaintext JSON first
+        String json = null;
+        try {
+            Type type = new TypeToken<List<SnapshotProfile>>() {}.getType();
+            List<SnapshotProfile> test = GSON.fromJson(content, type);
+            if (test != null) json = content;
+        } catch (Throwable ignored) {}
+
+        // Fall back to legacy encrypted format
+        if (json == null) {
+            json = decrypt(ctx, content);
+            if (json == null) throw new Exception("Failed to parse import file");
+        }
 
         Type type = new TypeToken<List<SnapshotProfile>>() {}.getType();
         List<SnapshotProfile> imported = GSON.fromJson(json, type);
@@ -160,9 +188,11 @@ public class ProfileManager {
     private static void saveAll(Context ctx, List<SnapshotProfile> profiles) {
         try {
             String json = GSON.toJson(profiles);
-            String encrypted = encrypt(ctx, json);
             SharedPreferences prefs = ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
-            prefs.edit().putString(KEY_PROFILES, encrypted).apply();
+            prefs.edit()
+                    .putString(KEY_PROFILES_PLAIN, json)
+                    .remove(KEY_PROFILES)   // clean up legacy encrypted key
+                    .apply();
         } catch (Throwable ignored) {
         }
     }

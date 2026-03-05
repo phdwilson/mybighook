@@ -16,11 +16,11 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import de.robv.android.xposed.IXposedHookLoadPackage;
@@ -66,14 +66,22 @@ public class HookMain implements IXposedHookLoadPackage {
                     "com.android.incallui",
                     "com.android.nfc",
                     "com.android.bluetooth",
-                    "com.android.se"
+                    "com.android.se",
+                    "com.android.location.fused",
+                    "com.android.providers.settings",
+                    "com.android.networkstack",
+                    "com.android.providers.media",
+                    "com.android.permissioncontroller",
+                    "com.google.android.providers.media.module",
+                    "com.android.shell",
+                    "com.android.keychain",
+                    "com.android.inputdevices"
             )));
 
     // ── Per-process state (each hooked process has its own instance) ──────────
     private android.content.Context appCtx = null;
     private volatile LocationSnapshot cachedSnap = null;
     private volatile long lastCacheRefresh = 0L;
-    private final Random rng = new Random();
     private final ConcurrentHashMap<String, Long> lastReportTime = new ConcurrentHashMap<>();
     /** Prevents multiple threads from refreshing the snapshot cache concurrently. */
     private final AtomicBoolean refreshing = new AtomicBoolean(false);
@@ -191,13 +199,9 @@ public class HookMain implements IXposedHookLoadPackage {
             });
         }
 
-        // First activation: cachedSnap is null and no refresh has completed yet.
-        // Try a single synchronous load so the very first hook call gets data,
-        // but only if we are not already refreshing in another thread.
-        if (cachedSnap == null && lastCacheRefresh == 0L) {
-            refreshSnapshotFromProvider();
-        }
-
+        // Return whatever is cached (may be null on very first call — hooks
+        // will pass through to real data, which is the safest behaviour until
+        // the async refresh completes).
         return cachedSnap;
     }
 
@@ -317,7 +321,7 @@ public class HookMain implements IXposedHookLoadPackage {
                             LocationSnapshot s = getSnapshot();
                             if (s == null) return;
                             float base = (s.accuracy > 0) ? s.accuracy : 5.0f;
-                            p.setResult(base + (float)(rng.nextGaussian() * 0.5));
+                            p.setResult(base + (float)(ThreadLocalRandom.current().nextGaussian() * 0.5));
                         }
                     });
         } catch (Throwable ignored) {}
@@ -375,7 +379,7 @@ public class HookMain implements IXposedHookLoadPackage {
                             if (extras == null) extras = new android.os.Bundle();
                             else extras = new android.os.Bundle(extras);
                             // Typical GPS fix has 8–14 satellites
-                            extras.putInt("satellites", BASE_SATELLITE_COUNT + rng.nextInt(SATELLITE_COUNT_VARIANCE));
+                            extras.putInt("satellites", BASE_SATELLITE_COUNT + ThreadLocalRandom.current().nextInt(SATELLITE_COUNT_VARIANCE));
                             p.setResult(extras);
                         }
                     });
@@ -436,13 +440,13 @@ public class HookMain implements IXposedHookLoadPackage {
         loc.setLongitude(s.longitude + gpsNoise(1));
         loc.setAltitude(s.altitude + altNoise());
         float base = (s.accuracy > 0) ? s.accuracy : 5.0f;
-        loc.setAccuracy(base + (float)(rng.nextGaussian() * 0.5));
+        loc.setAccuracy(base + (float)(ThreadLocalRandom.current().nextGaussian() * 0.5));
         loc.setBearing(s.bearing);
         loc.setSpeed(s.speed);
         loc.setTime(System.currentTimeMillis());
         loc.setElapsedRealtimeNanos(SystemClock.elapsedRealtimeNanos());
         android.os.Bundle extras = new android.os.Bundle();
-        extras.putInt("satellites", BASE_SATELLITE_COUNT + rng.nextInt(SATELLITE_COUNT_VARIANCE));
+        extras.putInt("satellites", BASE_SATELLITE_COUNT + ThreadLocalRandom.current().nextInt(SATELLITE_COUNT_VARIANCE));
         loc.setExtras(extras);
         // Clear mock flag via reflection
         clearMockFlag(loc);
@@ -1124,7 +1128,7 @@ public class HookMain implements IXposedHookLoadPackage {
                 // Simulate breathing-induced micro-movement (~0.03 Hz, 0.04 m/s²)
                 double drift = 0.04 * Math.sin(t * 0.03 * 2 * Math.PI);
                 for (int i = 0; i < Math.min(3, v.length); i++) {
-                    v[i] += (float)(drift * Math.cos(i * 1.2) + rng.nextGaussian() * 0.005);
+                    v[i] += (float)(drift * Math.cos(i * 1.2) + ThreadLocalRandom.current().nextGaussian() * 0.005);
                 }
                 break;
             }
@@ -1132,27 +1136,27 @@ public class HookMain implements IXposedHookLoadPackage {
                 // Zero-rate offset drift typical of MEMS gyros (~0.001 rad/s)
                 double drift = 0.001 * Math.sin(t * 0.01 * 2 * Math.PI);
                 for (int i = 0; i < Math.min(3, v.length); i++) {
-                    v[i] += (float)(drift + rng.nextGaussian() * 0.0003);
+                    v[i] += (float)(drift + ThreadLocalRandom.current().nextGaussian() * 0.0003);
                 }
                 break;
             }
             case Sensor.TYPE_MAGNETIC_FIELD: {
                 double drift = 0.3 * Math.sin(t * 0.05 * 2 * Math.PI);
                 for (int i = 0; i < Math.min(3, v.length); i++) {
-                    v[i] += (float)(drift * Math.sin(i + 1.0) + rng.nextGaussian() * 0.05);
+                    v[i] += (float)(drift * Math.sin(i + 1.0) + ThreadLocalRandom.current().nextGaussian() * 0.05);
                 }
                 break;
             }
             case Sensor.TYPE_PRESSURE: {
                 // Barometric micro-fluctuation (~0.02 hPa, period ~10 s)
                 v[0] += (float)(0.02 * Math.sin(t * 0.1 * 2 * Math.PI)
-                        + rng.nextGaussian() * 0.005);
+                        + ThreadLocalRandom.current().nextGaussian() * 0.005);
                 break;
             }
             default: {
                 // Generic small noise to break fingerprinting
                 for (int i = 0; i < v.length; i++) {
-                    v[i] += (float)(rng.nextGaussian() * 0.002);
+                    v[i] += (float)(ThreadLocalRandom.current().nextGaussian() * 0.002);
                 }
             }
         }
@@ -1170,14 +1174,14 @@ public class HookMain implements IXposedHookLoadPackage {
         double t  = SystemClock.elapsedRealtime() / 1000.0;
         double period = (axis == 0) ? 87.3 : 113.7; // slightly different per-axis
         double sin  = 0.000009 * Math.sin(t * 2 * Math.PI / period);
-        double gaus = rng.nextGaussian() * 0.000002;
+        double gaus = ThreadLocalRandom.current().nextGaussian() * 0.000002;
         return sin + gaus;
     }
 
     /** Altitude noise: ±0.3 m sinusoidal + 0.05 m Gaussian. */
     private double altNoise() {
         double t = SystemClock.elapsedRealtime() / 1000.0;
-        return 0.3 * Math.sin(t * 2 * Math.PI / 60.0) + rng.nextGaussian() * 0.05;
+        return 0.3 * Math.sin(t * 2 * Math.PI / 60.0) + ThreadLocalRandom.current().nextGaussian() * 0.05;
     }
 
     /**
@@ -1188,14 +1192,14 @@ public class HookMain implements IXposedHookLoadPackage {
         double t = SystemClock.elapsedRealtime() / 1000.0;
         double phase = (bssid != null ? (bssid.hashCode() & 0xFFFFF) : 0) * 0.0001;
         int sinusoidalDrift  = (int)(2.0 * Math.sin(t * 2 * Math.PI / 18.0 + phase));
-        int gaussianJitter   = (int)(rng.nextGaussian() * 0.8);
+        int gaussianJitter   = (int)(ThreadLocalRandom.current().nextGaussian() * 0.8);
         return sinusoidalDrift + gaussianJitter;
     }
 
     /** Cell signal noise: ±3 dBm sinusoidal (period ~25 s) + 1 dBm Gaussian. */
     private int cellNoise() {
         double t = SystemClock.elapsedRealtime() / 1000.0;
-        return (int)(3.0 * Math.sin(t * 2 * Math.PI / 25.0) + rng.nextGaussian());
+        return (int)(3.0 * Math.sin(t * 2 * Math.PI / 25.0) + ThreadLocalRandom.current().nextGaussian());
     }
 
     // ─────────────────────────────────────────────────────────────────────────
