@@ -3,7 +3,6 @@ package com.servicehook;
 import android.content.Context;
 import android.content.SharedPreferences;
 import android.util.Base64;
-import android.util.Log;
 
 import com.google.gson.Gson;
 import com.google.gson.reflect.TypeToken;
@@ -34,7 +33,6 @@ import javax.crypto.spec.SecretKeySpec;
  */
 public class ProfileManager {
 
-    private static final String TAG = "SH-Profile";
     private static final String PREFS_NAME           = "sh_profiles";
     private static final String KEY_PROFILES_PLAIN   = "profiles_plain";
 

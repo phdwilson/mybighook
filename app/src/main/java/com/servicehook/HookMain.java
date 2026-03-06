@@ -1060,7 +1060,10 @@ public class HookMain implements IXposedHookLoadPackage {
      */
     private void hookSensorDispatch(ClassLoader cl) {
         // Build a handle→type lookup map when sensors are registered
-        // so we can apply type-appropriate noise in dispatchSensorEvent
+        // so we can apply type-appropriate noise in dispatchSensorEvent.
+        // Signature: (SensorEventListener, Sensor, int, Handler, int, int) – 6 params.
+        // An earlier version incorrectly used 7 params (extra Object.class) which
+        // caused a NoSuchMethodError and silently disabled the sensor type mapping.
         try {
             XposedHelpers.findAndHookMethod(
                     "android.hardware.SystemSensorManager", cl,
