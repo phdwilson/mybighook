@@ -132,23 +132,33 @@ public class SnapshotManager {
         try {
             LocationManager lm = (LocationManager) ctx.getSystemService(Context.LOCATION_SERVICE);
             if (lm == null) return;
-            Location loc = null;
-            // Prefer GPS provider, fall back to network
+            Location best = null;
+            // Try all providers and pick the one with the best data (prefer altitude).
             for (String provider : new String[]{LocationManager.GPS_PROVIDER,
                     LocationManager.NETWORK_PROVIDER, LocationManager.FUSED_PROVIDER}) {
                 try {
-                    loc = lm.getLastKnownLocation(provider);
-                    if (loc != null) break;
+                    Location loc = lm.getLastKnownLocation(provider);
+                    if (loc == null) continue;
+                    if (best == null) {
+                        best = loc;
+                    } else if (loc.hasAltitude() && !best.hasAltitude()) {
+                        // Prefer a location that includes altitude data
+                        best = loc;
+                    } else if (loc.hasAltitude() == best.hasAltitude()
+                            && loc.getTime() > best.getTime()) {
+                        // Same altitude availability → prefer more recent
+                        best = loc;
+                    }
                 } catch (Throwable ignored) {
                 }
             }
-            if (loc != null) {
-                snap.latitude  = loc.getLatitude();
-                snap.longitude = loc.getLongitude();
-                snap.altitude  = loc.getAltitude();
-                snap.accuracy  = loc.getAccuracy();
-                snap.bearing   = loc.getBearing();
-                snap.speed     = loc.getSpeed();
+            if (best != null) {
+                snap.latitude  = best.getLatitude();
+                snap.longitude = best.getLongitude();
+                snap.altitude  = best.getAltitude();
+                snap.accuracy  = best.getAccuracy();
+                snap.bearing   = best.getBearing();
+                snap.speed     = best.getSpeed();
             }
         } catch (Throwable ignored) {
         }
