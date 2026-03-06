@@ -369,8 +369,8 @@ public class MainActivity extends AppCompatActivity {
     private void startExport() {
         Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("application/octet-stream");
-        intent.putExtra(Intent.EXTRA_TITLE, "servicehook_profiles.enc");
+        intent.setType("application/json");
+        intent.putExtra(Intent.EXTRA_TITLE, "servicehook_profiles.json");
         startActivityForResult(intent, REQ_EXPORT_FILE);
     }
 

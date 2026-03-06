@@ -2,6 +2,8 @@ package com.servicehook;
 
 import android.content.ContentProvider;
 import android.content.ContentValues;
+import android.content.Context;
+import android.content.SharedPreferences;
 import android.database.Cursor;
 import android.net.Uri;
 import android.os.Binder;
@@ -16,7 +18,10 @@ import java.util.concurrent.atomic.AtomicLong;
  *   - the UI process (MainActivity / SnapshotManager) – sets the active snapshot
  *   - hook code injected into target-app processes – reads the snapshot and reports intercepts
  *
- * No files or XSharedPreferences are used; all data lives in this provider process.
+ * The active snapshot is persisted in SharedPreferences so that it survives
+ * process death.  When Android kills the servicehook process and a hooked
+ * app triggers a ContentProvider restart, {@link #onCreate()} restores the
+ * last activated snapshot automatically.
  *
  * UID policy
  * ──────────
@@ -32,6 +37,10 @@ import java.util.concurrent.atomic.AtomicLong;
 public class StatsProvider extends ContentProvider {
 
     public static final String AUTHORITY     = "com.servicehook.stats";
+
+    // SharedPreferences keys — must match SnapshotManager
+    private static final String PREFS_NAME   = "sh_prefs";
+    private static final String PREFS_KEY    = "active_snapshot";
 
     // ── Command tokens ────────────────────────────────────────────────────────
     /** Set the active simulation snapshot (admin only). */
@@ -61,6 +70,21 @@ public class StatsProvider extends ContentProvider {
 
     @Override
     public boolean onCreate() {
+        // Restore the last activated snapshot from SharedPreferences so that
+        // hooks still receive fake data even after the app process is killed
+        // and restarted by a hooked app's ContentResolver.call().
+        try {
+            Context ctx = getContext();
+            if (ctx != null) {
+                SharedPreferences prefs =
+                        ctx.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
+                String json = prefs.getString(PREFS_KEY, null);
+                if (json != null) {
+                    activeSnapshotJson = json;
+                }
+            }
+        } catch (Throwable ignored) {
+        }
         return true;
     }
 
